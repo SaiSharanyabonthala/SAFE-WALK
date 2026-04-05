@@ -1,0 +1,102 @@
+import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios'; 
+import AuthPage from './Auth';
+import './App.css';
+
+function App() {
+  const [user, setUser] = useState(localStorage.getItem('user'));
+  const [status, setStatus] = useState("System Ready ✅");
+  const [countdown, setCountdown] = useState(null);
+  const timerRef = useRef(null);
+
+  const onLogin = (username) => {
+    setUser(username);
+    localStorage.setItem('user', username);
+  };
+
+  const handleLogout = () => {
+    localStorage.clear();
+    setUser(null);
+  };
+
+  // THE EMERGENCY TRIGGER
+  const triggerSOS = async () => {
+    setStatus("🚨 ALERT SENT & RECORDING!");
+    
+    // Start Camera/Mic Recording
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const recorder = new MediaRecorder(stream);
+      recorder.start();
+      setTimeout(() => {
+        recorder.stop();
+        stream.getTracks().forEach(track => track.stop());
+      }, 10000);
+    } catch (e) { console.log("Recording failed"); }
+
+    // Send Location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        await axios.post('http://localhost:5000/api/sos', { userId: user, latitude, longitude });
+      });
+    }
+  };
+
+  // THE COUNTDOWN LOGIC
+  const handleSOSClick = () => {
+    if (countdown !== null) return; 
+    setCountdown(5);
+    setStatus("⚠️ STARTING IN...");
+
+    timerRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          triggerSOS();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  if (!user) return <AuthPage onLogin={onLogin} />;
+
+  return (
+    <div className="dashboard-container">
+      <header className="dashboard-header">
+        <div className="user-profile">
+          <div className="avatar-small">{user.toUpperCase()}</div>
+          <span>Protected: <b>{user}</b></span>
+        </div>
+        <button className="logout-btn" onClick={handleLogout}>Logout</button>
+      </header>
+
+      <main className="sos-section">
+        <h1 className="brand-name">SafeWalk</h1>
+        <p className="status-text">{status}</p>
+        
+        <div className="sos-ring">
+          <button 
+            className={`sos-btn-main ${countdown !== null ? 'counting' : ''}`} 
+            onClick={handleSOSClick}
+          >
+            {countdown !== null ? countdown : "SOS"}
+          </button>
+        </div>
+
+        <p className="hint-text">
+          {countdown !== null ? "Protocol initiating..." : "Tap the button in case of emergency"}
+        </p>
+      </main>
+
+      <footer className="dashboard-footer">
+        <div className="info-pill">Location Tracking: ON</div>
+        <div className="info-pill">Guardian Connected</div>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
