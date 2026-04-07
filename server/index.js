@@ -27,7 +27,7 @@ const upload = multer({ storage: storage });
 const TELEGRAM_TOKEN = '8637140116:AAEVke8aMDF4P6-jMMQDdbNuxyT6EiFwhK0'; 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
-const MONGO_URI = "mongodb+srv://saidevbonthala_db_user:IGsDR8YgM4K1sSpK@cluster17.ovxrdvo.mongodb.net/SafeWalk?retryWrites=true&w=majority";
+const MONGO_URI = "mongodb+srv://saidevbonthala_db_user:e2J77pe0t1Ayr6H7@cluster17.ovxrdvo.mongodb.net/?appName=Cluster17";
 mongoose.connect(MONGO_URI).then(() => console.log("✅ SafeWalk DB Connected!"));
 
 const userSchema = new mongoose.Schema({
