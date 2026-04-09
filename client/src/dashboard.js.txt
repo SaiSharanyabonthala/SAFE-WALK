@@ -3,6 +3,9 @@ import axios from 'axios';
 import AuthPage from './Auth';
 import './App.css';
 
+// REPLACE THIS with your actual Render URL
+const API_BASE_URL = "https://safe-walk-application-1.onrender.com";
+
 function App() {
   const [user, setUser] = useState(localStorage.getItem('user'));
   const [status, setStatus] = useState("System Ready ✅");
@@ -27,6 +30,8 @@ function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       const recorder = new MediaRecorder(stream);
+      
+      // OPTIONAL: You can also send the video to your new /api/upload-video endpoint here later
       recorder.start();
       setTimeout(() => {
         recorder.stop();
@@ -38,7 +43,14 @@ function App() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(async (pos) => {
         const { latitude, longitude } = pos.coords;
-        await axios.post('http://localhost:5000/api/sos', { userId: user, latitude, longitude });
+        try {
+          // FIXED: Now using the cloud Render URL
+          await axios.post(`${API_BASE_URL}/api/sos`, { userId: user, latitude, longitude });
+          setStatus("✅ Help is on the way!");
+        } catch (err) {
+          console.error("SOS failed to send:", err);
+          setStatus("❌ Alert Failed. Check Internet.");
+        }
       });
     }
   };

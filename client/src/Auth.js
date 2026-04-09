@@ -9,8 +9,8 @@ import {
   signInWithEmailAndPassword 
 } from './firebase'; 
 
-// Use your Laptop's IPv4 Address here
-const API_BASE = "http://10.244.136.168:5000"; 
+// FIXED: Using your live Render URL instead of local IP
+const API_BASE = "https://safe-walk-application-1.onrender.com"; 
 
 const AuthPage = ({ onLogin }) => {
   const [step, setStep] = useState(1); 
@@ -28,15 +28,16 @@ const AuthPage = ({ onLogin }) => {
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      setFormData({ 
-        ...formData, 
+      // Update state and move to step 2
+      setFormData((prev) => ({ 
+        ...prev, 
         email: result.user.email, 
         profilePic: result.user.photoURL 
-      });
+      }));
       setStep(2); 
     } catch (error) {
       console.error("Auth Error:", error);
-      alert("Google Sign-In failed. Check your Firebase config!");
+      alert("Google Sign-In failed. Make sure you added your Vercel link to Firebase Authorized Domains!");
     }
   };
 
@@ -44,11 +45,10 @@ const AuthPage = ({ onLogin }) => {
     try {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, formData.email, formData.password);
-        setStep(2);
       } else {
         await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-        setStep(2);
       }
+      setStep(2);
     } catch (error) {
       alert(error.message);
     }
@@ -56,19 +56,20 @@ const AuthPage = ({ onLogin }) => {
 
   const handleNext = () => setStep(step + 1);
 
-  // UPDATED: This function now uses the API_BASE variable
   const startApp = async () => {
     try {
-      // Sending data to your Node.js backend
+      // FIXED: Now connects to the Cloud Backend on Render
       await axios.post(`${API_BASE}/api/signup`, formData);
       
+      // WhatsApp message for the Guardian
       const msg = `🚨 SafeWalk Emergency Link: Please click 'Start' to connect to my alerts: https://t.me/${botUsername}?start=${formData.username}`;
       window.open(`https://wa.me/${formData.contact}?text=${encodeURIComponent(msg)}`, '_blank');
       
       handleNext();
     } catch (err) { 
       console.error("Backend Error:", err);
-      alert(`Server Error! Make sure your backend is running at ${API_BASE}`); 
+      // Detailed error message to help you debug
+      alert(`Backend unreachable at ${API_BASE}. Ensure Render service is 'Live'.`); 
     }
   };
 
@@ -114,7 +115,7 @@ const AuthPage = ({ onLogin }) => {
               
               <p className="signup-text">
                 {isLogin ? "Don't have an account? " : "Already have an account? "}
-                <span onClick={() => setIsLogin(!isLogin)} style={{cursor: 'pointer', fontWeight: 'bold'}}>
+                <span onClick={() => setIsLogin(!isLogin)} style={{cursor: 'pointer', fontWeight: 'bold', color: '#6e48aa'}}>
                   {isLogin ? "Sign Up" : "Log In"}
                 </span>
               </p>
@@ -124,7 +125,7 @@ const AuthPage = ({ onLogin }) => {
           {step === 2 && (
             <div className="fade-in">
               <h2 className="purple-text">Create Identity</h2>
-              {formData.profilePic && <img src={formData.profilePic} alt="User" className="profile-preview" />}
+              {formData.profilePic && <img src={formData.profilePic} alt="User" className="profile-preview" style={{borderRadius: '50%', width: '80px', marginBottom: '10px'}} />}
               <input className="auth-input-styled" placeholder="Username" onChange={(e)=>setFormData({...formData, username: e.target.value})} />
               <button className="action-btn" onClick={handleNext} disabled={!formData.username}>Next</button>
             </div>
@@ -133,7 +134,7 @@ const AuthPage = ({ onLogin }) => {
           {step === 3 && (
             <div className="fade-in">
               <h2 className="purple-text">How to Use</h2>
-              <div className="tutorial-box">
+              <div className="tutorial-box" style={{textAlign: 'left', padding: '15px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px'}}>
                 <p>🛡️ 1. Enter Guardian's WhatsApp.</p>
                 <p>📱 2. They connect via Telegram.</p>
                 <p>🆘 3. Tap SOS for location & recording.</p>
@@ -145,7 +146,7 @@ const AuthPage = ({ onLogin }) => {
           {step === 4 && (
             <div className="fade-in">
               <h2 className="purple-text">Add Guardian</h2>
-              <input className="auth-input-styled" placeholder="WhatsApp Number" onChange={(e)=>setFormData({...formData, contact: e.target.value})} />
+              <input className="auth-input-styled" placeholder="WhatsApp Number (with country code)" onChange={(e)=>setFormData({...formData, contact: e.target.value})} />
               <button className="action-btn" onClick={startApp} disabled={!formData.contact}>Connect</button>
             </div>
           )}
@@ -153,6 +154,7 @@ const AuthPage = ({ onLogin }) => {
           {step === 5 && (
             <div className="fade-in">
               <h2 className="purple-text">Everything Set!</h2>
+              <p>Your emergency protocol is ready.</p>
               <button className="action-btn" onClick={() => onLogin(formData.username)}>Enter Dashboard</button>
             </div>
           )}
