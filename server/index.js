@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -5,47 +7,83 @@ const TelegramBot = require('node-telegram-bot-api');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config();
+const { GoogleGenerativeAI, SchemaType } = require('@google/generative-ai');
 
 const app = express();
-app.use(cors());
+
+// Relaxed CORS for dev to prevent network blockages across ports
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(express.json());
 
-// PORT CONFIGURATION (CRITICAL FOR RENDER)
-const PORT = process.env.PORT || 10000; 
+const PORT = process.env.PORT || 5000;
 
-// Ensure uploads folder exists
+// Initialize Gemini AI with JSON Mode schema
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+  console.error("❌ CRITICAL ERROR: GEMINI_API_KEY is missing from process.env!");
+}
+
+// Replace "gemini-2.5-flash" with "gemini-3.5-flash" or "gemini-flash-latest"
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-3.5-flash", // or "gemini-flash-latest"
+  generationConfig: {
+    responseMimeType: "application/json",
+    responseSchema: {
+      type: SchemaType.OBJECT,
+      properties: {
+        riskLevel: {
+          type: SchemaType.STRING,
+          enum: ["Low", "Medium", "High"],
+        },
+        precautions: {
+          type: SchemaType.ARRAY,
+          items: { type: SchemaType.STRING },
+        },
+      },
+      required: ["riskLevel", "precautions"],
+    },
+  },
+});
+// Setup Uploads Directory
 const uploadDir = './uploads';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir);
 }
 
-// Multer Storage Config
 const storage = multer.diskStorage({
   destination: (req, file, cb) => { cb(null, 'uploads/'); },
   filename: (req, file, cb) => { cb(null, Date.now() + '-' + file.originalname); }
 });
 const upload = multer({ storage: storage });
 
-// SECURE TOKENS (Using Environment Variables)
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '8637140116:AAEVke8aMDF4P6-jMMQDdbNuxyT6EiFwhK0'; 
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://saidevbonthala_db_user:e2J77pe0t1Ayr6H7@cluster17.ovxrdvo.mongodb.net/rakshanet?retryWrites=true&w=majority";
+// Bot & Database Configurations
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN; 
+const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/rakshanet";
 
-// Initialize Bot with error handling for the 409 Conflict
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+if (!TELEGRAM_TOKEN) {
+  console.warn("⚠️ WARNING: TELEGRAM_TOKEN is missing from process.env!");
+}
+
+const bot = new TelegramBot(TELEGRAM_TOKEN || "PLACEHOLDER", { polling: true });
 
 bot.on('polling_error', (error) => {
-  if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
-    console.log("⚠️ Telegram Bot conflict detected. Ensure only one instance is running.");
+  if (error.message.includes('409 Conflict')) {
+    console.log("⚠️ Conflict! Ensure no other bot polling instance is running.");
   } else {
-    console.error("Bot Polling Error:", error.code);
+    console.error("Bot Error:", error.message);
   }
 });
 
+// MongoDB Connection
 mongoose.connect(MONGO_URI)
-  .then(() => console.log("✅ SafeWalk Cloud DB Connected!"))
+  .then(() => console.log("✅ Local Server: MongoDB Connected!"))
   .catch(err => console.error("❌ DB Connection Error:", err));
 
+// User Schema
 const userSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   email: String,
@@ -58,17 +96,23 @@ const User = mongoose.model('User', userSchema);
 // Link Telegram Bot
 bot.onText(/\/start (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  const usernameFromLink = match; // Corrected index for regex match
-  const updatedUser = await User.findOneAndUpdate(
-    { username: usernameFromLink },
-    { telegramChatId: chatId, isConnected: true },
-    { new: true }
-  );
-  if (updatedUser) {
-    bot.sendMessage(chatId, `💜 <b>Connected to SafeWalk!</b>\n\nYou will receive SOS alerts for <b>${usernameFromLink}</b>.`, { parse_mode: 'HTML' });
+  const usernameFromLink = match[1];
+  
+  try {
+    const updatedUser = await User.findOneAndUpdate(
+      { username: usernameFromLink },
+      { telegramChatId: chatId, isConnected: true },
+      { new: true }
+    );
+    if (updatedUser) {
+      bot.sendMessage(chatId, `💜 <b>Connected to SafeWalk!</b>\n\nYou will receive SOS alerts for <b>${usernameFromLink}</b>.`, { parse_mode: 'HTML' });
+    }
+  } catch (err) {
+    console.error("Telegram Link Error:", err);
   }
 });
 
+// Signup Route
 app.post('/api/signup', async (req, res) => {
   const { username, email, contact } = req.body;
   try {
@@ -83,43 +127,96 @@ app.post('/api/signup', async (req, res) => {
   }
 });
 
-// ROUTE: Send Location Alert
+// SOS Alert Route
 app.post('/api/sos', async (req, res) => {
-  const { userId, latitude, longitude } = req.body;
-  const user = await User.findOne({ username: userId });
-  if (user && user.telegramChatId) {
-    const mapLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
-    const message = `🚨 <b>SOS ALERT: ${userId.toUpperCase()}</b> 🚨\n\nI am in danger! Track me here:\n📍 ${mapLink}`;
-    await bot.sendMessage(user.telegramChatId, message, { parse_mode: 'HTML' });
-    res.status(200).json({ success: true });
-  } else {
-    res.status(404).json({ error: "Contact not connected via Telegram." });
+  try {
+    const { userId, latitude, longitude } = req.body;
+    const user = await User.findOne({ username: userId });
+
+    if (user && user.telegramChatId) {
+      const mapLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
+      const message = `🚨 <b>SOS ALERT: ${userId.toUpperCase()} NEEDS HELP</b> 🚨\n\nLocation: 📍 <a href="${mapLink}">View on Google Maps</a>`;
+      await bot.sendMessage(user.telegramChatId, message, { parse_mode: 'HTML' });
+      return res.status(200).json({ success: true });
+    } else {
+      return res.status(404).json({ error: "Guardian not connected to Telegram Bot yet." });
+    }
+  } catch (err) {
+    console.error("SOS Route Error:", err);
+    res.status(500).json({ error: "Failed to process SOS alert." });
   }
 });
 
-// ROUTE: Receive Video and Forward to Telegram
+// Video Upload Route
 app.post('/api/upload-video', upload.single('video'), async (req, res) => {
+  const filePath = req.file ? req.file.path : null;
   try {
+    if (!filePath) {
+      return res.status(400).json({ error: "No video uploaded" });
+    }
+
     const { userId } = req.body;
-    const filePath = req.file.path;
     const user = await User.findOne({ username: userId });
 
     if (user && user.telegramChatId) {
       await bot.sendVideo(user.telegramChatId, filePath, {
         caption: `📽️ SOS Emergency Recording from ${userId}`
       });
-      console.log(`✅ Recording for ${userId} sent to Telegram!`);
-      // Delete local file after sending to save space on Render
-      fs.unlinkSync(filePath); 
     }
     res.json({ success: true });
   } catch (err) {
-    console.error("Recording process failed:", err);
+    console.error("Video Route Error:", err);
     res.status(500).json({ error: "Failed to process recording" });
+  } finally {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
   }
 });
 
-// Use 0.0.0.0 to allow Render to bind to the port
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// AI Safety Context Route
+app.post('/api/ai/safety-context', async (req, res) => {
+  try {
+    const { lat, lng, time, destination } = req.body;
+
+    let locationInfo = "";
+    if (destination && destination.trim() !== "") {
+      locationInfo = `Destination / Area: ${destination}`;
+    } else if (lat != null && lng != null) {
+      locationInfo = `Coordinates: Lat ${lat}, Lng ${lng}`;
+    } else {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Missing location or destination input." 
+      });
+    }
+
+    const prompt = `
+      Act as an AI Public Safety Risk Assessment Engine.
+      Analyze the current context:
+      - ${locationInfo}
+      - Time of Day: ${time || 'Current Time'}
+
+      Evaluate temporal factors (night vs day) and standard public safety risks for urban environments.
+    `;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+
+    // Strip potential markdown code fences from AI output
+    const cleanText = responseText.replace(/```json|```/g, '').trim();
+    const cleanJson = JSON.parse(cleanText);
+
+    res.json({ success: true, data: cleanJson });
+  } catch (err) {
+    console.error("❌ AI Context Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message || "Failed to generate safety context advice." 
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Local Backend active on http://localhost:${PORT}`);
 });

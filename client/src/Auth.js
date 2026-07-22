@@ -1,20 +1,13 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-// Import your firebase config
-import { 
-  auth, 
-  googleProvider, 
-  signInWithPopup, 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword 
-} from './firebase'; 
+import { auth, googleProvider, signInWithPopup } from './firebase'; 
 
-// FIXED: Using your live Render URL instead of local IP
-const API_BASE = "https://safe-walk-application-1.onrender.com"; 
+// Pointing to your local Node server port
+const API_BASE = "http://localhost:5000"; 
 
 const AuthPage = ({ onLogin }) => {
   const [step, setStep] = useState(1); 
-  const [isLogin, setIsLogin] = useState(true); 
+  const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({ 
     email: "", 
     password: "",
@@ -28,7 +21,6 @@ const AuthPage = ({ onLogin }) => {
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      // Update state and move to step 2
       setFormData((prev) => ({ 
         ...prev, 
         email: result.user.email, 
@@ -37,39 +29,29 @@ const AuthPage = ({ onLogin }) => {
       setStep(2); 
     } catch (error) {
       console.error("Auth Error:", error);
-      alert("Google Sign-In failed. Make sure you added your Vercel link to Firebase Authorized Domains!");
+      alert("Google Sign-In failed.");
     }
   };
 
-  const handleEmailAuth = async () => {
-    try {
-      if (isLogin) {
-        await signInWithEmailAndPassword(auth, formData.email, formData.password);
-      } else {
-        await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-      }
-      setStep(2);
-    } catch (error) {
-      alert(error.message);
+  const handleEmailLogin = () => {
+    // For a simple PoC, we are skipping firebase email auth check 
+    // and moving straight to identity setup
+    if(formData.email && (isLogin ? formData.password : true)) {
+        setStep(2);
+    } else {
+        alert("Please fill in all fields.");
     }
   };
-
-  const handleNext = () => setStep(step + 1);
 
   const startApp = async () => {
     try {
-      // FIXED: Now connects to the Cloud Backend on Render
       await axios.post(`${API_BASE}/api/signup`, formData);
-      
-      // WhatsApp message for the Guardian
-      const msg = `🚨 SafeWalk Emergency Link: Please click 'Start' to connect to my alerts: https://t.me/${botUsername}?start=${formData.username}`;
+      const msg = `🚨 SafeWalk Protection: I have added you as my guardian. Please click 'Start' on this bot to receive my alerts: https://t.me/${botUsername}?start=${formData.username}`;
       window.open(`https://wa.me/${formData.contact}?text=${encodeURIComponent(msg)}`, '_blank');
-      
-      handleNext();
+      setStep(3);
     } catch (err) { 
       console.error("Backend Error:", err);
-      // Detailed error message to help you debug
-      alert(`Backend unreachable at ${API_BASE}. Ensure Render service is 'Live'.`); 
+      alert("Cannot connect to local server at Port 5000."); 
     }
   };
 
@@ -85,11 +67,11 @@ const AuthPage = ({ onLogin }) => {
               
               <button className="google-login-btn" onClick={handleGoogleLogin}>
                   <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" width="20"/>
-                  {isLogin ? "Login with Google" : "Sign up with Google"}
+                  Continue with Google
               </button>
-              
+
               <div className="divider"><span>or</span></div>
-              
+
               <input 
                 className="auth-input-styled" 
                 placeholder="Email" 
@@ -99,23 +81,19 @@ const AuthPage = ({ onLogin }) => {
               
               <input 
                 className="auth-input-styled" 
-                type="password" 
+                type="password"
                 placeholder="Password" 
                 value={formData.password}
                 onChange={(e) => setFormData({...formData, password: e.target.value})}
               />
-              
-              <button 
-                className="action-btn" 
-                onClick={handleEmailAuth}
-                disabled={!formData.email || !formData.password}
-              >
+
+              <button className="action-btn" onClick={handleEmailLogin}>
                 {isLogin ? "Log in" : "Sign Up"}
               </button>
-              
-              <p className="signup-text">
+
+              <p className="signup-text" style={{marginTop: '20px', textAlign: 'center'}}>
                 {isLogin ? "Don't have an account? " : "Already have an account? "}
-                <span onClick={() => setIsLogin(!isLogin)} style={{cursor: 'pointer', fontWeight: 'bold', color: '#6e48aa'}}>
+                <span onClick={() => setIsLogin(!isLogin)} style={{cursor: 'pointer', fontWeight: 'bold', color: '#6b46c1'}}>
                   {isLogin ? "Sign Up" : "Log In"}
                 </span>
               </p>
@@ -124,46 +102,38 @@ const AuthPage = ({ onLogin }) => {
 
           {step === 2 && (
             <div className="fade-in">
-              <h2 className="purple-text">Create Identity</h2>
-              {formData.profilePic && <img src={formData.profilePic} alt="User" className="profile-preview" style={{borderRadius: '50%', width: '80px', marginBottom: '10px'}} />}
-              <input className="auth-input-styled" placeholder="Username" onChange={(e)=>setFormData({...formData, username: e.target.value})} />
-              <button className="action-btn" onClick={handleNext} disabled={!formData.username}>Next</button>
+              <h2 className="purple-text">Setup Security</h2>
+              <input 
+                className="auth-input-styled" 
+                placeholder="Choose a Unique Username" 
+                onChange={(e)=>setFormData({...formData, username: e.target.value})} 
+              />
+              <input 
+                className="auth-input-styled" 
+                placeholder="Guardian's WhatsApp " 
+                onChange={(e)=>setFormData({...formData, contact: e.target.value})} 
+              />
+              <button className="action-btn" onClick={startApp} disabled={!formData.username || !formData.contact}>
+                Sync with Guardian
+              </button>
             </div>
           )}
 
           {step === 3 && (
             <div className="fade-in">
-              <h2 className="purple-text">How to Use</h2>
-              <div className="tutorial-box" style={{textAlign: 'left', padding: '15px', background: '#f8f9fa', borderRadius: '8px', marginBottom: '15px'}}>
-                <p>🛡️ 1. Enter Guardian's WhatsApp.</p>
-                <p>📱 2. They connect via Telegram.</p>
-                <p>🆘 3. Tap SOS for location & recording.</p>
-              </div>
-              <button className="action-btn" onClick={handleNext}>Got it!</button>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="fade-in">
-              <h2 className="purple-text">Add Guardian</h2>
-              <input className="auth-input-styled" placeholder="WhatsApp Number (with country code)" onChange={(e)=>setFormData({...formData, contact: e.target.value})} />
-              <button className="action-btn" onClick={startApp} disabled={!formData.contact}>Connect</button>
-            </div>
-          )}
-
-          {step === 5 && (
-            <div className="fade-in">
               <h2 className="purple-text">Everything Set!</h2>
-              <p>Your emergency protocol is ready.</p>
-              <button className="action-btn" onClick={() => onLogin(formData.username)}>Enter Dashboard</button>
+              <p>Your guardian must tap <b>Start</b> in the bot to activate alerts.</p>
+              <button className="action-btn" onClick={() => onLogin(formData.username)}>
+                Enter Dashboard
+              </button>
             </div>
           )}
         </div>
       </div>
       <div className="auth-image-side">
         <div className="image-overlay">
-          <h2>Women's Safety</h2>
-          <p>Protecting you every step of the way.</p>
+          <h2>Secure Your Walk</h2>
+          <p>Instant alerts. Real-time recording. Peace of mind.</p>
         </div>
       </div>
     </div>
